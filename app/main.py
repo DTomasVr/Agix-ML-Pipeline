@@ -101,6 +101,25 @@ def _raiz():
     return Path(d)
 
 
+CODIGO = Path(__file__).resolve().parent.parent / "codigo"
+
+
+def _codigo_del_repositorio(raiz):
+    """El codigo de las tuberias viene del repositorio de GitHub, no del de modelos.
+
+    El repositorio de modelos solo tiene que aportar los pesos y los datos. Si la imagen
+    trae `codigo/` (src/ y estimador/src/), esos archivos sustituyen a los descargados,
+    asi que un cambio de codigo se despliega con un push, sin volver a subir 3 GB."""
+    if not CODIGO.exists():
+        return
+    import shutil
+    for f in CODIGO.rglob("*.py"):
+        destino = Path(raiz) / f.relative_to(CODIGO)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, destino)
+        log.info("codigo del repositorio: %s", destino.relative_to(raiz))
+
+
 def _modulo(ruta, alias):
     spec = importlib.util.spec_from_file_location(alias, ruta)
     m = importlib.util.module_from_spec(spec)
@@ -113,6 +132,7 @@ def _cargar():
     t0 = time.time()
     try:
         raiz = _raiz()
+        _codigo_del_repositorio(raiz)
         os.environ["AGIX_BASE"] = str(raiz)
         os.environ.setdefault("AGIX_DEVICE", "cpu")
         os.environ["HF_HUB_OFFLINE"] = "1"          # a partir de aquí todo es local
@@ -215,6 +235,9 @@ class PeticionBacklog(BaseModel):
                                          "Mejor si dice quién lo usa y qué tiene que poder "
                                          "hacer cada uno.")
     k_historias: int = Field(12, ge=4, le=20, description="Historias del backlog.")
+    previo_equipo: Optional[float] = Field(
+        None, description="Media de los `desplazamiento` guardados de los proyectos ya "
+                          "terminados del equipo. Punto de partida del total.")
 
 
 class Historia(BaseModel):
@@ -229,6 +252,18 @@ class PeticionEstimar(BaseModel):
     cerradas: Optional[List[Optional[float]]] = Field(
         None, description="Horas reales de las tareas ya cerradas, en el orden en que "
                           "aparecen recorriendo las historias; null donde no estén cerradas.")
+    respuestas: Optional[List[Optional[float]]] = Field(
+        None, description="Horas que el usuario dice que tardó «la última vez» en algo así, "
+                          "mismo orden, null donde no conteste. Anclan como una cerrada; si "
+                          "una tarea tiene las dos, gana la cerrada.")
+    previo_equipo: Optional[float] = Field(
+        None, description="Media de los `desplazamiento` de los proyectos anteriores del equipo.")
+
+
+class PeticionDesplazamiento(BaseModel):
+    historias: List[Historia]
+    horas: List[float] = Field(..., description="Horas reales de TODAS las tareas del proyecto "
+                                                "terminado, en el orden en que aparecen.")
 
 
 # ------------------------------------------------------------------ endpoints
@@ -255,7 +290,7 @@ def backlog(p: PeticionBacklog):
     with _Turno(CANDADO_GEN):
         r = _M["GENERADOR"](p.descripcion, k_historias=p.k_historias)
     with _Turno(CANDADO_EST):
-        r = _M["ESTIMADOR"].estimar(r)
+        r = _M["ESTIMADOR"].estimar(r, previo_equipo=p.previo_equipo)
     r["segundos"] = round(time.time() - t, 2)
     return _json(r)
 
@@ -266,12 +301,28 @@ def estimar(p: PeticionEstimar):
     _listo()
     r = {"historias": [h.model_dump() for h in p.historias]}
     n = sum(len(h["tareas"]) for h in r["historias"])
-    if p.cerradas is not None and len(p.cerradas) != n:
-        raise HTTPException(422, f"`cerradas` tiene {len(p.cerradas)} valores y el backlog "
-                                 f"{n} tareas: tienen que coincidir")
-    if p.cerradas is not None and any(v is not None and v <= 0 for v in p.cerradas):
-        raise HTTPException(422, "las horas de `cerradas` tienen que ser positivas")
+    for nombre, v in (("cerradas", p.cerradas), ("respuestas", p.respuestas)):
+        if v is not None and len(v) != n:
+            raise HTTPException(422, f"`{nombre}` tiene {len(v)} valores y el backlog "
+                                     f"{n} tareas: tienen que coincidir")
+        if v is not None and any(x is not None and x <= 0 for x in v):
+            raise HTTPException(422, f"las horas de `{nombre}` tienen que ser positivas")
     with _Turno(CANDADO_EST):
-        r = _M["ESTIMADOR"].estimar(r, cerradas=p.cerradas)
+        r = _M["ESTIMADOR"].estimar(r, cerradas=p.cerradas, respuestas=p.respuestas,
+                                    previo_equipo=p.previo_equipo)
     r["n_tareas"] = n
     return _json(r)
+
+
+@app.post("/desplazamiento", dependencies=[Depends(_clave)])
+def desplazamiento(p: PeticionDesplazamiento):
+    """El valor a guardar de un proyecto terminado; la media de los del equipo es su
+    `previo_equipo` en el siguiente proyecto."""
+    _listo()
+    r = {"historias": [h.model_dump() for h in p.historias]}
+    n = sum(len(h["tareas"]) for h in r["historias"])
+    if len(p.horas) != n or any(x <= 0 for x in p.horas):
+        raise HTTPException(422, f"`horas` necesita {n} valores positivos, uno por tarea")
+    with _Turno(CANDADO_EST):
+        d = _M["ESTIMADOR"].desplazamiento(r, p.horas)
+    return {"desplazamiento": d, "n_tareas": n}

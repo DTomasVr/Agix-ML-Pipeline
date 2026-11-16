@@ -75,6 +75,34 @@ tareas que ya se cerraron. Es rápido (~2 s) y es lo que se llama cada vez que s
 - `cerradas` tiene **un valor por tarea**, en el orden en que aparecen recorriendo las historias,
   con `null` donde la tarea no está cerrada.
 
+### Afinar el total con lo que sabe el equipo
+
+`/estimar` acepta además, con la misma alineación que `cerradas`:
+
+- `respuestas`: las horas que el usuario dice que tardó «la última vez» en algunas tareas, `null`
+  en el resto. Anclan el total igual que una tarea cerrada (si una tarea tiene las dos, gana la
+  cerrada) y no estrechan la banda. Conviene pedir unas 10 al crear el proyecto.
+- `previo_equipo`: la media de los `desplazamiento` de los proyectos anteriores del equipo.
+  También se acepta en `/backlog`.
+
+### `POST /desplazamiento`
+
+Al terminar un proyecto, devuelve el valor que hay que guardar para el equipo:
+
+```json
+{"historias": [{"tareas": ["..."]}], "horas": [3.5, 2.0, "..."]}
+```
+
+`horas` lleva las horas reales de **todas** las tareas, en el mismo orden. Hay que guardar este
+valor, no calcularlo aparte: se mide contra la misma base con la que se ancla.
+
+## Código
+
+El código de las tuberías está en `codigo/` (`src/19_pipeline.py`, `src/34_estimacion.py` y
+`estimador/src/171_estimador_v6.py`). Al arrancar sustituye al que trae el repositorio de modelos,
+así que un cambio de código se despliega con un push a `main`; el repositorio de modelos solo
+aporta los pesos y los datos.
+
 ## Errores
 
 | código | cuándo | qué hacer |
