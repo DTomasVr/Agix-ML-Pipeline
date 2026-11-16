@@ -1,0 +1,14 @@
+# Las mismas versiones con las que esta verificado el paquete de produccion
+# (Agix-produccion/requisitos.txt). torch va aparte, en el Dockerfile.
+transformers==5.16.1
+sentence-transformers==6.0.1
+pandas==3.0.5
+numpy==2.5.2
+scikit-learn==1.9.0
+joblib==1.5.3
+sentencepiece==0.2.2
+onnxruntime==1.31.0
+pyarrow
+huggingface_hub==1.30.0
+fastapi==0.120.4
+uvicorn==0.38.0
