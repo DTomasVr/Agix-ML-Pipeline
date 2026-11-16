@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir --user torch==2.11.0 --index-url https://download
  && pip install --no-cache-dir --user -r requirements.txt
 
 COPY --chown=user app ./app
+COPY --chown=user codigo ./codigo
 
 EXPOSE 7860
 # un solo proceso: cada uno carga sus propios modelos (~5 GB de RAM)
